@@ -1085,6 +1085,14 @@ func getLoopbackAdrress(proto iptables.Protocol) string {
 	}
 }
 
+func getEnvoyInboundLoopbackAddress(proto iptables.Protocol) string {
+	if proto == iptables.ProtocolIPv4 {
+		return "127.0.0.6"
+	} else {
+		return "::6"
+	}
+}
+
 func (b *MasqueradeBindMechanism) createNatRulesUsingNftables(proto iptables.Protocol) error {
 	err := Handler.NftablesNewChain(proto, "nat", "KUBEVIRT_PREINBOUND")
 	if err != nil {
@@ -1122,6 +1130,15 @@ func (b *MasqueradeBindMechanism) createNatRulesUsingNftables(proto iptables.Pro
 		if port.Protocol == "" {
 			port.Protocol = "tcp"
 		}
+		err = Handler.NftablesAppendRule(proto, "nat", "KUBEVIRT_POSTINBOUND",
+			strings.ToLower(port.Protocol),
+			"dport",
+			strconv.Itoa(int(port.Port)),
+			Handler.GetNFTIPString(proto), "saddr", getEnvoyInboundLoopbackAddress(proto),
+			"counter", "snat", "to", b.getGatewayByProtocol(proto))
+		if err != nil {
+			return err
+		}
 
 		err = Handler.NftablesAppendRule(proto, "nat", "KUBEVIRT_POSTINBOUND",
 			strings.ToLower(port.Protocol),
@@ -1144,6 +1161,16 @@ func (b *MasqueradeBindMechanism) createNatRulesUsingNftables(proto iptables.Pro
 
 		err = Handler.NftablesAppendRule(proto, "nat", "output",
 			Handler.GetNFTIPString(proto), "daddr", getLoopbackAdrress(proto),
+			strings.ToLower(port.Protocol),
+			"dport",
+			strconv.Itoa(int(port.Port)),
+			"counter", "dnat", "to", b.getVifIpByProtocol(proto))
+		if err != nil {
+			return err
+		}
+
+		err = Handler.NftablesAppendRule(proto, "nat", "output",
+			Handler.GetNFTIPString(proto), "saddr", getEnvoyInboundLoopbackAddress(proto),
 			strings.ToLower(port.Protocol),
 			"dport",
 			strconv.Itoa(int(port.Port)),
